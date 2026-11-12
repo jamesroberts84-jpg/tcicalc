@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Propofol TCI Simulator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+/* Layout: one shared time axis; each simulation is a lane (narrow pump panel + wide chart), lanes stacked vertically. */
+:root {
+  /* Single dark "theatre monitor" world: near-black ground, bright traces, cyan for controls. */
+  --bg: #090c0e; --panel: #0f1418; --plot: #0b1013; --ink: #e8eef1; --ink-2: #a9b4bb; --ink-3: #7f8b93;
+  --line: #222a30; --grid: #161d22; --accent: #3ad1e6; --accent-ink: #061316; --field: #151c21; --fieldline: #2a343b;
+  --band: rgba(58, 209, 230, 0.10); --ghost: #3a4750;
+  --warn-bg: #3a2d10; --warn-ink: #f5d58a; --err-bg: #3d1a1a; --err-ink: #f4b4b4;
+  --s1: #3ad1e6; --s2: #f0b43c; --s3: #b48cff; --s4: #ff8fc8;
+  --cp: #ff5a5a; --ce: #3ee37f;
+  --font-body: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Manrope", system-ui, sans-serif;
+  --font-num: "Manrope", system-ui, sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 13px/1.4 var(--font-body); }
+h1 { font-family: var(--font-display); font-size: 22px; font-weight: 800; letter-spacing: -0.01em; margin: 0; }
+button, input, select { font: inherit; color: inherit; }
+input, select { color: var(--ink); }
+input:disabled { opacity: 1; color: var(--ink-2); -webkit-text-fill-color: var(--ink-2); background: transparent; border-style: dashed; }
+.pop input[type="number"] { font-size: 18px; font-weight: 700; padding: 6px 8px; }
+.pop label { font-size: 12px; color: var(--ink-2); }
+.num, input[type="number"], .read b, td.n, .stats b, svg text { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+body { font-variant-numeric: tabular-nums; }
+input[type="number"], input[type="text"], select { background: var(--field); border: 1px solid var(--fieldline); border-radius: 5px; padding: 3px 5px; min-width: 0; width: 100%; }
+input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+button { cursor: pointer; border-radius: 5px; border: 1px solid var(--fieldline); background: var(--field); padding: 3px 9px; }
+button:hover:not(:disabled) { border-color: var(--ink-3); }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+button.ghost { border-color: transparent; background: transparent; color: var(--ink-2); }
+
+header.top { display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: center; justify-content: space-between; padding: 12px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+header.top p { margin: 0; color: var(--ink-2); }
+.globals { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+.patient { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin: 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.patient legend { font-family: var(--font-display); font-weight: 700; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; padding: 0 4px; color: var(--accent); }
+.patient label { display: flex; gap: 6px; align-items: center; color: var(--ink-2); white-space: nowrap; }
+.patient input[type="number"] { width: 64px; background: var(--field); }
+.patient select { width: auto; background: var(--field); }
+.patient .bmi { color: var(--ink-2); font-size: 13px; display: flex; gap: 16px; }
+.patient .bmi b { font-weight: 700; font-size: 18px; color: var(--ink); }
+.globals label { display: flex; gap: 6px; align-items: center; color: var(--ink-2); white-space: nowrap; }
+.globals input[type="number"] { width: 64px; }
+.globals select { width: auto; }
+
+.board { margin: 12px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+.lane { display: grid; grid-template-columns: 250px minmax(0, 1fr); border-top: 1px solid var(--line); }
+.lane:first-child { border-top: 0; }
+.lane.axis-row { border-top: 1px solid var(--line); }
+.pumpcol { padding: 10px 12px; border-right: 1px solid var(--line); border-left: 4px solid var(--c, transparent); display: grid; gap: 7px; align-content: start; min-width: 0; }
+.plotcol { position: relative; min-width: 0; padding: 6px 10px 0 0; background: var(--plot); }
+.plotcol svg { display: block; width: 100%; touch-action: none; user-select: none; }
+.head { display: flex; gap: 6px; align-items: center; }
+.head input.name { font-family: var(--font-display); font-weight: 600; font-size: 15px; background: transparent; border-color: transparent; padding: 1px 3px; }
+.head input.name:hover, .head input.name:focus { background: var(--field); border-color: var(--line); }
+.swatch { width: 11px; height: 11px; border-radius: 3px; background: var(--c); flex: none; display: inline-block; }
+.seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; border: 1px solid var(--fieldline); border-radius: 5px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; background: var(--field); color: var(--ink-2); padding: 3px 4px; white-space: nowrap; }
+.seg button + button { border-left: 1px solid var(--fieldline); }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.pt { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+.pt label, .opts label { display: grid; gap: 1px; font-size: 11px; color: var(--ink-3); }
+.field1 { display: grid; gap: 2px; font-size: 11px; color: var(--ink-3); }
+.opts { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.stats { font-size: 12px; color: var(--ink-2); display: grid; gap: 1px; }
+.stats b { font-weight: 700; color: var(--ink); }
+.chip { font-size: 11.5px; padding: 3px 6px; border-radius: 5px; background: var(--warn-bg); color: var(--warn-ink); }
+.chip.err { background: var(--err-bg); color: var(--err-ink); }
+.btnrow { display: flex; gap: 6px; flex-wrap: wrap; }
+.pumpcol .btnrow button { font-size: 12px; padding: 1px 4px; white-space: nowrap; }
+
+.read { position: absolute; top: 6px; right: 16px; display: flex; gap: 14px; align-items: baseline; font-size: 12px; color: var(--ink-2); background: color-mix(in srgb, var(--panel) 88%, transparent); padding: 2px 6px; border-radius: 5px; pointer-events: none; }
+.read b { color: var(--ink); font-weight: 700; font-size: 16px; }
+.hint { color: var(--ink-3); font-size: 12px; padding: 8px 12px; }
+.axis text, .lbl { fill: var(--ink-3); font: 500 10.5px var(--font-num); }
+.lblt { fill: var(--ink-2); font: 600 11px var(--font-body); }
+.gridline { stroke: var(--grid); }
+.base { stroke: var(--line); }
+.tick { stroke: var(--ink-3); }
+.cross { stroke: var(--ink-3); stroke-dasharray: 3 3; }
+.handle { cursor: grab; }
+.handle:active { cursor: grabbing; }
+.handle circle.vis { fill: var(--panel); stroke-width: 2; }
+.handle:hover circle.vis, .handle.sel circle.vis { fill: var(--c); }
+.plotarea { cursor: crosshair; }
+
+.pop { position: absolute; z-index: 5; background: var(--panel); border: 1px solid var(--fieldline); border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.6); padding: 10px; display: grid; gap: 8px; width: 210px; }
+.pop .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.pop label { display: grid; gap: 2px; font-size: 11px; color: var(--ink-3); }
+.pop .btnrow { justify-content: space-between; }
+.pop .del { color: var(--err-ink); }
+
+.addrow { display: flex; gap: 10px; align-items: center; padding: 10px 12px; border-top: 1px solid var(--line); color: var(--ink-3); flex-wrap: wrap; }
+.empty { padding: 28px 20px 8px; max-width: 560px; }
+.empty h2 { font-family: var(--font-display); font-size: 17px; margin: 0 0 4px; }
+.empty p { margin: 0; color: var(--ink-2); }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 500; }
+.alert { position: fixed; z-index: 20; left: 50%; top: 18px; transform: translateX(-50%); width: min(560px, calc(100% - 32px)); display: flex; gap: 14px; align-items: flex-start;
+  background: #2a2110; border: 1px solid #8a6a1f; border-left: 5px solid #f0b43c; border-radius: 10px; padding: 14px 16px; box-shadow: 0 16px 40px rgba(0,0,0,0.6); color: var(--ink); }
+.alert-icon { flex: none; width: 26px; height: 26px; border-radius: 50%; background: #f0b43c; color: #1a1300; font-weight: 800; display: grid; place-items: center; font-size: 16px; }
+.alert h2 { margin: 0 0 4px; font-size: 15px; font-weight: 800; color: #ffe2a3; }
+.alert p { margin: 0; color: #e9dcc0; font-size: 13px; line-height: 1.45; }
+.alert-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.alert-actions button { background: transparent; border-color: #8a6a1f; color: #ffe2a3; padding: 6px 12px; font-weight: 600; }
+.alert-actions .alert-primary { background: #f0b43c; border-color: #f0b43c; color: #1a1300; }
+@media (prefers-reduced-motion: no-preference) { .alert { animation: drop 0.18s ease-out; } @keyframes drop { from { transform: translate(-50%, -8px); opacity: 0.6; } } }
+details.params { margin: 0 16px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; }
+details.params summary { cursor: pointer; font-weight: 600; font-family: var(--font-display); font-size: 14px; }
+table { border-collapse: collapse; width: 100%; margin-top: 8px; }
+th, td { padding: 4px 8px; border-bottom: 1px solid var(--line); text-align: left; }
+th { font-weight: 500; color: var(--ink-2); font-size: 12px; }
+td.n, th.n { text-align: right; }
+.scroll { overflow-x: auto; }
+.foot { color: var(--ink-3); font-size: 11.5px; margin: 0 16px 20px; max-width: 900px; }
+@media (max-width: 760px) {
+  .lane { grid-template-columns: 1fr; }
+  .pumpcol { border-right: 0; border-bottom: 1px solid var(--line); }
+  .plotcol { padding-left: 4px; }
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div>
+    <h1>Propofol TCI simulator</h1>
+    <p>Add a run, then click its chart to add a target change at that time. Drag a handle to move it, or click it to type exact values.</p>
+  </div>
+  <div class="globals">
+    <label for="g-duration">Duration <input id="g-duration" type="number" min="5" max="600" step="5"> min</label>
+    <label for="g-conc">Propofol <select id="g-conc"><option value="10">1%</option><option value="20">2%</option></select></label>
+    <label for="g-max">Max rate <input id="g-max" type="number" min="50" max="2000" step="50"> mL/h</label>
+    <label for="g-wake">Wake Ce <input id="g-wake" type="number" min="0.1" max="5" step="0.1"> µg/mL</label>
+    <label for="g-ghost"><input id="g-ghost" type="checkbox"> Show other runs' Ce</label>
+    <label for="g-bis"><input id="g-bis" type="checkbox"> Estimate BIS for Marsh/Schnider</label>
+    <button id="reset" class="ghost" type="button">Clear all</button>
+  </div>
+  <fieldset class="patient">
+    <legend>Patient (all runs)</legend>
+    <label for="p-age">Age <input id="p-age" type="number" min="0.1" max="100" step="1"> y</label>
+    <label for="p-weight">Weight <input id="p-weight" type="number" min="1" max="250" step="1"> kg</label>
+    <label for="p-height">Height <input id="p-height" type="number" min="40" max="230" step="1"> cm</label>
+    <label for="p-sex">Sex <select id="p-sex"><option value="M">Male</option><option value="F">Female</option></select></label>
+    <span class="bmi" id="p-bmi"></span>
+  </fieldset>
+</header>
+
+<div class="board" id="board"></div>
+
+<details class="params">
+  <summary>Model parameters for each run</summary>
+  <div class="scroll" id="params"></div>
+</details>
+<p class="foot">For teaching and model comparison only, not for clinical dosing. The pump updates every 5 s. Effect-site mode gives the largest rate whose predicted Ce peak stays at or below target, then holds Ce at target. BIS uses the Eleveld PD model (age-adjusted Ce50). Models: Marsh 1991, Schnider 1998/1999, Eleveld 2018.</p>
+
+<script>
+// ---------- PK engine: Marsh, Schnider, Eleveld propofol; plasma & effect-site TCI ----------
+const MODELS = {
+  marsh_dip:{ label: 'Marsh (ke0 0.26)', short: 'Marsh' },
+  schnider: { label: 'Schnider', short: 'Schnider' },
+  eleveld:  { label: 'Eleveld', short: 'Eleveld' }
+};
+
+function jamesLBM(w, h, male) {
+  return male ? 1.1 * w - 128 * (w / h) ** 2 : 1.07 * w - 148 * (w / h) ** 2;
+}
+
+function eleveldCe50(age) { return 3.08 * Math.exp(-0.00635 * (age - 35)); }
+
+function modelParams(run) {
+  const age = +run.age, w = +run.weight, h = +run.height, male = run.sex === 'M';
+  const warnings = [];
+  const bmi = w / (h / 100) ** 2;
+  if (!(age > 0) || !(w > 0) || !(h > 0)) return { error: 'Enter age, weight and height.' };
+  let p;
+  if (run.model === 'marsh' || run.model === 'marsh_dip') {
+    const V1 = 0.228 * w;
+    p = { V1, k10: 0.119, k12: 0.112, k13: 0.0419, k21: 0.055, k31: 0.0033,
+          ke0: run.model === 'marsh' ? 1.2 : 0.26 };
+    p.V2 = V1 * p.k12 / p.k21; p.V3 = V1 * p.k13 / p.k31;
+    p.CL = V1 * p.k10; p.Q2 = V1 * p.k12; p.Q3 = V1 * p.k13;
+    if (bmi > 35) warnings.push('BMI ' + bmi.toFixed(0) + ': Marsh scales every volume with total body weight');
+    if (age < 16) warnings.push('Adult Marsh parameters; Paedfusor/Eleveld are built for children');
+    if (run.model === 'marsh_dip' && run.mode === 'effect') warnings.push('Marsh with ke0 0.26 was built for plasma targeting (Diprifusor)');
+  } else if (run.model === 'schnider') {
+    const L = jamesLBM(w, h, male);
+    if (L <= 0) return { error: 'James lean body mass is negative at this weight and height, so Schnider cannot be calculated.' };
+    const V1 = 4.27, V2 = 18.9 - 0.391 * (age - 53), V3 = 238;
+    if (V2 <= 0) return { error: 'Schnider V2 is negative at this age.' };
+    const CL = 1.89 + 0.0456 * (w - 77) - 0.0681 * (L - 59) + 0.0264 * (h - 177);
+    const Q2 = 1.29 - 0.024 * (age - 53), Q3 = 0.836;
+    if (CL <= 0 || Q2 <= 0) return { error: 'Schnider clearance is negative for this patient.' };
+    p = { V1, V2, V3, CL, Q2, Q3, ke0: 0.456, lean: L, leanLabel: 'LBM (James)' };
+    const limit = male ? 42.9 : 36.1;
+    if (bmi > limit) warnings.push('BMI ' + bmi.toFixed(0) + ': James LBM now falls as weight rises (above BMI ' + (male ? 43 : 36) + ')');
+    if (age < 25 || age > 81) warnings.push('Age outside Schnider study range (25–81 y)');
+    if (w < 44 || w > 123) warnings.push('Weight outside Schnider study range (44–123 kg)');
+  } else {
+    const t = [null, 6.28, 25.5, 273, 1.79, 1.75, 1.11, 0.191, 42.3, 9.06, -0.0156, -0.00286, 33.6, -0.0138, 68.3, 2.10, 1.30, 1.42, 0.68];
+    const opi = !!run.opiates, art = run.sampling !== 'venous';
+    const PMA = age + 40 / 52;
+    const sig = (x, e, l) => x ** l / (x ** l + e ** l);
+    const fc = x => sig(x, t[12], 1);
+    const fage = x => Math.exp(x * (age - 35));
+    const fop = x => opi ? Math.exp(x * age) : 1;
+    const fclm = sig(PMA * 52, t[8], t[9]) / sig((35 + 40 / 52) * 52, t[8], t[9]);
+    const fq3 = sig(age * 52 + 40, t[14], 1), fq3r = sig(35 * 52 + 40, t[14], 1);
+    const ffm = (a, wt, b, m) => m
+      ? (0.88 + 0.12 / (1 + (a / 13.4) ** -12.7)) * 9270 * wt / (6680 + 216 * b)
+      : (1.11 - 0.11 / (1 + (a / 7.1) ** -1.1)) * 9270 * wt / (8780 + 244 * b);
+    const FFM = ffm(age, w, bmi, male), FFMr = ffm(35, 70, 70 / 1.7 ** 2, true);
+    let V1 = t[1] * fc(w) / fc(70);
+    if (!art) V1 *= 1 + t[17] * (1 - fc(w));
+    const V2 = t[2] * w / 70 * fage(t[10]);
+    const V3 = t[3] * FFM / FFMr * fop(t[13]);
+    const CL = (male ? t[4] : t[15]) * (w / 70) ** 0.75 * fclm * fop(t[11]);
+    const Q2 = t[5] * (V2 / t[2]) ** 0.75 * (1 + t[16] * (1 - fq3)) * (art ? 1 : t[18]);
+    const Q3 = t[6] * (V3 / t[3]) ** 0.75 * fq3 / fq3r;
+    const ke0 = (art ? 0.146 : 1.24) * (w / 70) ** -0.25;
+    p = { V1, V2, V3, CL, Q2, Q3, ke0, lean: FFM, leanLabel: 'FFM (Al-Sallami)' };
+  }
+  if (p.k10 === undefined) {
+    p.k10 = p.CL / p.V1; p.k12 = p.Q2 / p.V1; p.k13 = p.Q3 / p.V1;
+    p.k21 = p.Q2 / p.V2; p.k31 = p.Q3 / p.V3;
+  }
+  p.ce50 = eleveldCe50(age);
+  p.warnings = warnings;
+  return p;
+}
+
+// matrix exponential (scaling & squaring + Taylor)
+function matMul(A, B) {
+  const n = A.length, m = B[0].length, k = B.length, C = [];
+  for (let i = 0; i < n; i++) { C.push(new Array(m).fill(0));
+    for (let j = 0; j < m; j++) { let s = 0; for (let q = 0; q < k; q++) s += A[i][q] * B[q][j]; C[i][j] = s; } }
+  return C;
+}
+function expm(M) {
+  const n = M.length;
+  let norm = 0; for (const r of M) norm = Math.max(norm, r.reduce((a, v) => a + Math.abs(v), 0));
+  const s = Math.max(0, Math.ceil(Math.log2(norm || 1)) + 2);
+  const A = M.map(r => r.map(v => v / 2 ** s));
+  let R = A.map((r, i) => r.map((_, j) => (i === j ? 1 : 0)));
+  let T = R.map(r => r.slice());
+  for (let k = 1; k <= 20; k++) {
+    T = matMul(T, A).map(r => r.map(v => v / k));
+    R = R.map((r, i) => r.map((v, j) => v + T[i][j]));
+  }
+  for (let i = 0; i < s; i++) R = matMul(R, R);
+  return R;
+}
+
+function targetAt(schedule, t) {
+  let c = 0;
+  for (const s of schedule) if (s.t <= t + 1e-9) c = s.c;
+  return c;
+}
+
+// opts: duration (min), conc (mg/mL), maxRate (mL/h)
+function simulate(run, opts) {
+  const p = modelParams(run);
+  if (p.error) return { error: p.error };
+  const dt = 5 / 60; // 5-second control interval, as pumps do
+  const N = Math.round(opts.duration / dt);
+  const { V1, k10, k12, k13, k21, k31, ke0 } = p;
+  const Aaug = [
+    [-(k10 + k12 + k13), k21, k31, 0, 1],
+    [k12, -k21, 0, 0, 0],
+    [k13, 0, -k31, 0, 0],
+    [ke0 / V1, 0, 0, -ke0, 0],
+    [0, 0, 0, 0, 0]
+  ].map(r => r.map(v => v * dt));
+  const E = expm(Aaug);
+  const Phi = E.slice(0, 4).map(r => r.slice(0, 4));
+  const Gam = E.slice(0, 4).map(r => r[4]);
+  const H = Math.round(20 / dt);
+  const KMIN = 6; // maintenance look-ahead: 30 s
+  const R = [[0, 0, 0, 1]];
+  for (let k = 1; k <= H; k++) {
+    const prev = R[k - 1], row = [0, 0, 0, 0];
+    for (let j = 0; j < 4; j++) for (let q = 0; q < 4; q++) row[j] += prev[q] * Phi[q][j];
+    R.push(row);
+  }
+  const U = new Float64Array(H + 1);
+  for (let k = 1; k <= H; k++) U[k] = R[k - 1].reduce((a, v, j) => a + v * Gam[j], 0);
+  let VK = 0; for (let k = 1; k <= KMIN; k++) VK += U[k]; // Ce response at KMIN to a rate held for KMIN steps
+  const rmax = opts.maxRate * opts.conc / 60; // mg/min
+  const sched = run.schedule.slice().sort((a, b) => a.t - b.t);
+  const x = [0, 0, 0, 0];
+  const F = new Float64Array(H + 1);
+  const out = { t: [], cp: [], ce: [], rate: [], cum: [], target: [] };
+  let cum = 0;
+  for (let i = 0; i <= N; i++) {
+    const t = i * dt, T = targetAt(sched, t);
+    let r = 0;
+    if (i < N && T > 0) {
+      if (run.mode === 'plasma') {
+        const a1 = Phi[0][0] * x[0] + Phi[0][1] * x[1] + Phi[0][2] * x[2] + Phi[0][3] * x[3];
+        r = (T * V1 - a1) / Gam[0];
+      } else if (x[3] >= 0.999 * T) {
+        // maintenance: hold Ce at target 30 s ahead (avoids step-to-step chatter)
+        const Rk = R[KMIN];
+        const f = Rk[0] * x[0] + Rk[1] * x[1] + Rk[2] * x[2] + Rk[3] * x[3];
+        r = (T - f) / VK;
+      } else {
+        // rising to target: largest rate whose predicted Ce peak does not exceed target
+        let fmax = -Infinity;
+        for (let k = 1; k <= H; k++) {
+          const Rk = R[k]; F[k] = Rk[0] * x[0] + Rk[1] * x[1] + Rk[2] * x[2] + Rk[3] * x[3];
+          if (F[k] > fmax) fmax = F[k];
+        }
+        const g = rr => { let m = -Infinity; for (let k = 1; k <= H; k++) { const v = F[k] + rr * U[k]; if (v > m) m = v; } return m; };
+        if (fmax >= T) r = 0;
+        else if (g(rmax) <= T) r = rmax;
+        else { let lo = 0, hi = rmax; for (let it = 0; it < 40; it++) { const mid = (lo + hi) / 2; if (g(mid) > T) hi = mid; else lo = mid; } r = lo; }
+      }
+      r = Math.min(Math.max(r, 0), rmax);
+    }
+    out.t.push(t); out.cp.push(x[0] / V1); out.ce.push(x[3]);
+    out.rate.push(r); out.cum.push(cum); out.target.push(T);
+    if (i < N) {
+      const nx = [0, 0, 0, 0];
+      for (let j = 0; j < 4; j++) nx[j] = Phi[j][0] * x[0] + Phi[j][1] * x[1] + Phi[j][2] * x[2] + Phi[j][3] * x[3] + r * Gam[j];
+      x.splice(0, 4, ...nx);
+      cum += r * dt;
+    }
+  }
+  // BIS (Eleveld PD), from Ce
+  const ce50 = p.ce50;
+  out.bis = out.ce.map(c => { const g = c <= ce50 ? 1.47 : 1.89; const cg = c ** g; return 93 * (1 - cg / (cg + ce50 ** g)); });
+  // summary
+  const s = {}; const first = sched.find(q => q.c > 0); const T1 = first ? first.c : 0;
+  const i0r = first ? Math.round(first.t / dt) : 0;
+  let iReach = -1; if (T1 > 0) for (let i = i0r; i <= N; i++) if (out.ce[i] >= 0.95 * T1) { iReach = i; break; }
+  s.tReach = iReach >= 0 ? out.t[iReach] - first.t : null;
+  s.doseReach = iReach >= 0 ? out.cum[iReach] - out.cum[i0r] : null;
+  s.peakCp = Math.max(...out.cp); s.peakCe = Math.max(...out.ce);
+  s.total = cum;
+  const infTime = out.target.slice(0, N).filter(v => v > 0).length * dt;
+  s.meanRate = infTime > 0 ? cum / +run.weight / (infTime / 60) : null;
+  const last = sched[sched.length - 1];
+  if (last && last.c === 0 && last.t < opts.duration) {
+    const i0 = Math.round(last.t / dt);
+    let iw = -1; for (let i = i0; i <= N; i++) if (out.ce[i] <= opts.wakeCe) { iw = i; break; }
+    s.wake = iw >= 0 ? out.t[iw] - last.t : Infinity;
+  } else s.wake = null;
+  return { p, out, s, dt };
+}
+
+if (typeof module !== 'undefined') module.exports = { modelParams, simulate, expm };
+
+</script>
+<script>
+const MAX_RUNS = 4, LETTERS = ['A', 'B', 'C', 'D'], STORE = 'tci-sim-v2';
+const DT = 5 / 60;
+// lane geometry (px, in SVG units = CSS px)
+const G = { l: 38, r: 14, concTop: 30, concH: 150, gap: 8, rateH: 40, bisH: 40, bottom: 22 };
+G.rateTop = G.concTop + G.concH + G.gap + 12;
+G.bisTop = G.rateTop + G.rateH + G.gap + 12;
+G.H = G.bisTop + G.bisH + G.bottom;
+
+function emptyState() {
+  return { duration: 100, conc: 20, maxRate: 1200, wakeCe: 1.0, bisAll: false, ghost: true, nextId: 1, patient: { age: 40, weight: 70, height: 170, sex: 'M' }, runs: [] };
+}
+let state = emptyState();
+function save() {}
+const color = slot => `var(--s${slot + 1})`;
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const freeSlot = () => [0, 1, 2, 3].find(s => !state.runs.some(r => r.slot === s));
+const dur = () => Math.min(600, Math.max(5, +state.duration || 60));
+const fmtMin = m => { if (m == null) return '—'; if (m === Infinity) return 'not reached'; const mm = Math.floor(m), ss = Math.round((m - mm) * 60); return ss === 60 ? `${mm + 1}:00` : `${mm}:${String(ss).padStart(2, '0')}`; };
+
+let results = {}; // id -> sim result
+let hoverT = null, sel = null; // sel = {id, i}
+let scales = { conc: 6, rate: 200, rateClipped: false, rateMax: 0 };
+
+function simAll() {
+  const o = { duration: dur(), conc: state.conc, maxRate: state.maxRate, wakeCe: state.wakeCe };
+  for (const r of state.runs) { r.schedule.sort((a, b) => a.t - b.t); results[r.id] = simulate({ ...r, ...state.patient, sampling: 'arterial' }, o); }
+  computeScales();
+}
+function simOne(r) {
+  const o = { duration: dur(), conc: state.conc, maxRate: state.maxRate, wakeCe: state.wakeCe };
+  results[r.id] = simulate({ ...r, ...state.patient, sampling: 'arterial' }, o);
+}
+function computeScales() {
+  let tmax = 0, cemax = 0, rAll = 0; const nz = [];
+  for (const r of state.runs) {
+    for (const s of r.schedule) tmax = Math.max(tmax, s.c);
+    const res = results[r.id]; if (!res || res.error) continue;
+    for (const v of res.out.ce) cemax = Math.max(cemax, v);
+    res.out.rate.forEach((v, i) => { const ml = v * 60 / state.conc; rAll = Math.max(rAll, ml); if (res.out.t[i] >= 3 && ml > 0) nz.push(ml); });
+  }
+  scales.conc = niceTop(Math.max(tmax * 1.6, cemax * 1.15, 8));
+  nz.sort((a, b) => a - b);
+  const rm = nz.length ? nz[Math.floor(nz.length * 0.9)] : 0;
+  let rtop = Math.max(rm * 1.6, 20);
+  scales.rateClipped = rAll > rtop; if (!scales.rateClipped) rtop = Math.max(rAll * 1.1, 20);
+  scales.rate = niceTop(rtop); scales.rateMax = rAll;
+}
+function niceStep(raw) { const p = 10 ** Math.floor(Math.log10(raw)); const f = raw / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p; }
+function niceTop(v) { const st = niceStep(v / 4); return Math.ceil(v / st) * st; }
+function ticks(top, n) { const st = niceStep(top / n), out = []; for (let v = 0; v <= top + 1e-9; v += st) out.push(+v.toFixed(6)); return out; }
+
+// ---------- lanes ----------
+function pumpHTML(r) {
+  const id = r.id, isE = r.model === 'eleveld';
+  const opt = (v, l, cur) => `<option value="${v}"${v === cur ? ' selected' : ''}>${l}</option>`;
+  const seg = (k, v, l) => `<button type="button" data-k="${k}" data-v="${v}" aria-pressed="${r[k] === v}">${l}</button>`;
+  return `<div class="head"><span class="swatch" aria-hidden="true"></span>
+      <input class="name" id="r${id}-name" type="text" value="${esc(r.name)}" data-k="name" aria-label="Run name">
+      <button type="button" data-act="clone" title="New run with the same model settings and pump inputs"${state.runs.length >= MAX_RUNS ? ' disabled' : ''}>Clone</button>
+      <button type="button" class="ghost" data-act="remove" aria-label="Remove ${esc(r.name)}">✕</button></div>
+    <select id="r${id}-model" data-k="model" aria-label="Model">${Object.entries(MODELS).map(([k, m]) => opt(k, m.label, r.model)).join('')}</select>
+    <div class="seg" role="group" aria-label="Targeting">${seg('mode', 'plasma', 'Plasma target')}${seg('mode', 'effect', 'Effect-site target')}</div>
+    ${isE ? `<label class="field1">Opioids co-administered<div class="seg">${seg('opiates', false, 'No')}${seg('opiates', true, 'Yes')}</div></label>` : ''}
+    <div class="btnrow"><button type="button" class="ghost" data-act="sched-all" style="padding-left:0">Copy pump inputs to all</button></div>
+    <div class="stats" id="r${id}-stats"></div>
+    <div id="r${id}-chips" style="display:grid;gap:4px"></div>`;
+}
+
+function renderBoard() {
+  const b = document.getElementById('board');
+  b.innerHTML = state.runs.map(r => `<section class="lane" data-id="${r.id}" style="--c:${color(r.slot)}" aria-label="${esc(r.name)}">
+      <div class="pumpcol">${pumpHTML(r)}</div>
+      <div class="plotcol" id="r${r.id}-plot"></div></section>`).join('') +
+    (state.runs.length ? '' : `<div class="empty"><h2>No simulations yet</h2><p>Enter the patient above, add a run and choose its model. Then click the chart to set pump targets over time. Every run uses the same patient.</p></div>`) +
+    `<div class="addrow"><button type="button" id="add" class="${state.runs.length ? '' : 'primary'}"${state.runs.length >= MAX_RUNS ? ' disabled' : ''}>Add run</button><span>${state.runs.length >= MAX_RUNS ? 'Up to 4 runs.' : state.runs.length ? 'Or use Clone to copy a run and its pump inputs, then change the model.' : ''}</span></div>`;
+  drawAll();
+}
+
+function drawAll() { for (const r of state.runs) drawLane(r); renderSide(); renderParams(); }
+
+function plotWidth(r) { const el = document.getElementById(`r${r.id}-plot`); return Math.max(320, (el && el.clientWidth) || 800) - 10; }
+
+function drawLane(r) {
+  const host = document.getElementById(`r${r.id}-plot`); if (!host) return;
+  const W = plotWidth(r), D = dur(), res = results[r.id];
+  const pw = W - G.l - G.r;
+  const X = t => G.l + t / D * pw;
+  const Yc = v => G.concTop + G.concH - Math.min(v, scales.conc) / scales.conc * G.concH;
+  const Yr = v => G.rateTop + G.rateH - Math.min(v, scales.rate) / scales.rate * G.rateH;
+  const Yb = v => G.bisTop + G.bisH - v / 100 * G.bisH;
+  // time axis: labelled ticks every 5 min (wider if they would crowd), small marks every minute
+  const ppm = pw / D;
+  let maj = 5; for (const m of [5, 10, 15, 30, 60, 120]) { maj = m; if (m * ppm >= 30) break; }
+  const xt = []; for (let v = 0; v <= D + 1e-9; v += maj) xt.push(v);
+  const minorStep = ppm >= 3 ? 1 : ppm * 5 >= 3 ? 5 : 0;
+  const xm = []; if (minorStep) for (let v = 0; v <= D + 1e-9; v += minorStep) if (v % maj) xm.push(v);
+  const path = (ts, vs, Y, stepped, every = 1) => { let d = ''; for (let i = 0; i < vs.length; i += every) { if (stepped && i) d += `L${X(ts[i]).toFixed(1)},${Y(vs[i - 1]).toFixed(1)}`; d += `${i ? 'L' : 'M'}${X(ts[i]).toFixed(1)},${Y(vs[i]).toFixed(1)}`; } return d; };
+  const c = color(r.slot);
+  let s = `<svg viewBox="0 0 ${W} ${G.H}" height="${G.H}" data-id="${r.id}">`;
+  // gridlines + x ticks (shared time axis)
+  s += `<g class="axis">`;
+  for (const v of xt) s += `<line class="gridline" x1="${X(v)}" x2="${X(v)}" y1="${G.concTop}" y2="${G.bisTop + G.bisH}"/>`;
+  for (const v of ticks(scales.conc, 4)) s += `<line class="${v ? 'gridline' : 'base'}" x1="${G.l}" x2="${W - G.r}" y1="${Yc(v)}" y2="${Yc(v)}"/><text x="${G.l - 5}" y="${Yc(v) + 3.5}" text-anchor="end">${v}</text>`;
+  const yAx = G.bisTop + G.bisH;
+  for (const v of xm) s += `<line class="base" x1="${X(v)}" x2="${X(v)}" y1="${yAx}" y2="${yAx + 3}"/><line class="base" x1="${X(v)}" x2="${X(v)}" y1="${G.concTop + G.concH}" y2="${G.concTop + G.concH - 3}"/>`;
+  for (const v of xt) s += `<line class="tick" x1="${X(v)}" x2="${X(v)}" y1="${yAx}" y2="${yAx + 5}"/><line class="tick" x1="${X(v)}" x2="${X(v)}" y1="${G.concTop + G.concH}" y2="${G.concTop + G.concH - 5}"/>`;
+  for (const v of xt) s += `<text x="${X(v)}" y="${yAx + 16}" text-anchor="${X(v) > W - G.r - 8 ? 'end' : 'middle'}">${v}</text>`;
+  s += `<text x="${G.l - 8}" y="${yAx + 16}" text-anchor="end">min</text>`;
+  s += `<text class="lblt" x="${G.l}" y="${G.concTop - 10}">µg/mL</text>`;
+  s += `<line x1="${G.l + 48}" x2="${G.l + 66}" y1="${G.concTop - 14}" y2="${G.concTop - 14}" stroke="var(--cp)" stroke-width="1.25"/><text class="lblt" x="${G.l + 70}" y="${G.concTop - 10}">Cp</text>`;
+  s += `<line x1="${G.l + 94}" x2="${G.l + 112}" y1="${G.concTop - 14}" y2="${G.concTop - 14}" stroke="var(--ce)" stroke-width="2.5"/><text class="lblt" x="${G.l + 116}" y="${G.concTop - 10}">Ce</text>`;
+  s += `<line x1="${G.l + 140}" x2="${G.l + 158}" y1="${G.concTop - 14}" y2="${G.concTop - 14}" stroke="${c}" stroke-width="1.5" stroke-dasharray="5 4"/><text class="lblt" x="${G.l + 162}" y="${G.concTop - 10}">Target</text>`;
+  // strips
+  s += `<line class="base" x1="${G.l}" x2="${W - G.r}" y1="${Yr(0)}" y2="${Yr(0)}"/><text class="lblt" x="${G.l}" y="${G.rateTop - 4}">Infusion, mL/h</text><text x="${G.l - 5}" y="${G.rateTop + 4}" text-anchor="end">${scales.rate}</text>`;
+  s += `<rect x="${G.l}" y="${Yb(60)}" width="${pw}" height="${Yb(40) - Yb(60)}" fill="var(--band)"/><line class="base" x1="${G.l}" x2="${W - G.r}" y1="${Yb(0)}" y2="${Yb(0)}"/>`;
+  s += `<text class="lblt" x="${G.l}" y="${G.bisTop - 4}">BIS${r.model !== 'eleveld' && state.bisAll ? ' (estimated, Eleveld PD)' : ''}</text><text x="${G.l - 5}" y="${Yb(100) + 4}" text-anchor="end">100</text><text x="${G.l - 5}" y="${Yb(50) + 3.5}" text-anchor="end">50</text>`;
+  s += `</g>`;
+  if (res && !res.error) {
+    const o = res.out, every = Math.max(1, Math.floor(o.t.length / (pw * 1.5)));
+    // ghosts of other runs' Ce
+    if (state.ghost) for (const q of state.runs) { if (q === r) continue; const rq = results[q.id]; if (!rq || rq.error) continue;
+      s += `<path d="${path(rq.out.t, rq.out.ce, Yc, false, every)}" fill="none" stroke="var(--ghost)" stroke-width="1.25"/>`; }
+    // Cp (thin) and Ce (thick)
+    s += `<path d="${path(o.t, o.cp, Yc, false, every)}" fill="none" stroke="var(--cp)" stroke-width="1.25"/>`;
+    s += `<path d="${path(o.t, o.ce, Yc, false, every)}" fill="none" stroke="var(--ce)" stroke-width="2.5"/>`;
+    // rate as stepped area
+    const rml = o.rate.map(v => v * 60 / state.conc);
+    s += `<path d="${path(o.t, rml, Yr, true)}L${X(o.t[o.t.length - 1])},${Yr(0)}L${X(0)},${Yr(0)}Z" fill="${c}" fill-opacity="0.22" stroke="${c}" stroke-width="1.25"/>`;
+    if (r.model === 'eleveld' || state.bisAll) s += `<path d="${path(o.t, o.bis, Yb, false, every)}" fill="none" stroke="${c}" stroke-width="1.75"${r.model !== 'eleveld' ? ' stroke-dasharray="5 3"' : ''}/>`;
+    else s += `<text class="lbl" x="${G.l + 8}" y="${G.bisTop + G.bisH / 2 + 4}">No BIS model for ${MODELS[r.model].short}. Tick “Estimate BIS” above to borrow Eleveld’s.</text>`;
+    // labels at line ends
+    const iL = o.t.length - 1;
+    s += `<text class="lbl" x="${X(D) - 4}" y="${Yc(o.ce[iL]) - 5}" text-anchor="end">Ce</text>`;
+  } else if (res && res.error) {
+    s += `<text class="lbl" x="${G.l + 8}" y="${G.concTop + 20}">${esc(res.error)}</text>`;
+  }
+  // target step line + handles (pump inputs)
+  const sch = r.schedule;
+  let td = '';
+  sch.forEach((p, i) => { const x0 = X(Math.min(p.t, D)), x1 = X(Math.min(i + 1 < sch.length ? sch[i + 1].t : D, D)); td += `${i ? 'L' : 'M'}${x0},${Yc(p.c)}L${x1},${Yc(p.c)}`; });
+  s += `<rect class="plotarea" x="${G.l}" y="${G.concTop}" width="${pw}" height="${G.concH}" fill="transparent" data-role="area"/>`;
+  s += `<path d="${td}" fill="none" stroke="${c}" stroke-width="1.5" stroke-dasharray="5 4" pointer-events="none"/>`;
+  sch.forEach((p, i) => { if (p.t > D) return;
+    const on = sel && sel.id === r.id && sel.i === i;
+    s += `<g class="handle${on ? ' sel' : ''}" data-role="handle" data-i="${i}" tabindex="0" role="button" aria-label="Target ${p.c} µg/mL from ${p.t} min"><circle cx="${X(p.t)}" cy="${Yc(p.c)}" r="12" fill="transparent"/><circle class="vis" cx="${X(p.t)}" cy="${Yc(p.c)}" r="5.5" stroke="${c}"/><text class="lbl" x="${X(p.t) + 9}" y="${Yc(p.c) - 8}" pointer-events="none">${i === 0 ? (r.mode === 'effect' ? 'Ce' : 'Cp') + ' target ' : ''}${p.c}</text></g>`; });
+  s += `<line class="cross" id="r${r.id}-x" x1="-9" x2="-9" y1="${G.concTop}" y2="${G.bisTop + G.bisH}" pointer-events="none"/>`;
+  s += `</svg><div class="read" id="r${r.id}-read"></div>`;
+  const pop = host.querySelector('.pop');
+  host.innerHTML = s; if (pop) host.appendChild(pop);
+  host._g = { X, Yc, pw, W, D };
+  updateRead(r);
+}
+
+function renderSide() {
+  for (const r of state.runs) {
+    const res = results[r.id], st = document.getElementById(`r${r.id}-stats`), ch = document.getElementById(`r${r.id}-chips`);
+    if (!st) continue;
+    if (!res || res.error) { st.innerHTML = ''; ch.innerHTML = res ? `<div class="chip err">✕ ${esc(res.error)}</div>` : ''; continue; }
+    const s = res.s, w = +state.patient.weight;
+    st.innerHTML = `<span>To Ce 95% of target: <b>${fmtMin(s.tReach)}</b> min, <b>${s.doseReach == null ? '—' : s.doseReach.toFixed(0)}</b> mg${s.doseReach == null ? '' : ` (${(s.doseReach / w).toFixed(2)} mg/kg)`}</span>
+      <span>Total <b>${s.total.toFixed(0)}</b> mg (${(s.total / state.conc).toFixed(1)} mL) · peak Cp <b>${s.peakCp.toFixed(1)}</b></span>
+      <span>Ce ≤ ${state.wakeCe} after stop: <b>${s.wake == null ? 'no stop' : fmtMin(s.wake)}</b>${s.wake == null || s.wake === Infinity ? '' : ' min'}</span>`;
+    ch.innerHTML = res.p.warnings.map(x => `<div class="chip">⚠ ${esc(x)}</div>`).join('');
+  }
+  if (scales.rateClipped) {} // noted in each lane readout
+}
+
+function updateRead(r) {
+  const el = document.getElementById(`r${r.id}-read`), res = results[r.id], ln = document.getElementById(`r${r.id}-x`), g = document.getElementById(`r${r.id}-plot`)._g;
+  if (!el) return;
+  if (!res || res.error) { el.innerHTML = ''; return; }
+  const o = res.out;
+  let i, lab;
+  if (hoverT == null) { ln.setAttribute('x1', -9); ln.setAttribute('x2', -9); el.innerHTML = scales.rateClipped ? `<span>Infusion strip clipped at ${scales.rate} mL/h (boluses up to ${scales.rateMax.toFixed(0)})</span>` : ''; return; }
+  i = Math.min(o.t.length - 1, Math.max(0, Math.round(hoverT / DT)));
+  ln.setAttribute('x1', g.X(o.t[i])); ln.setAttribute('x2', g.X(o.t[i]));
+  const rml = o.rate[i] * 60 / state.conc;
+  el.innerHTML = `<span>${fmtMin(o.t[i])}</span><span>Cp <b>${o.cp[i].toFixed(2)}</b></span><span>Ce <b>${o.ce[i].toFixed(2)}</b></span><span>Rate <b>${rml.toFixed(0)}</b> mL/h</span><span>Dose <b>${o.cum[i].toFixed(0)}</b> mg</span>${(r.model === 'eleveld' || state.bisAll) ? `<span>BIS <b>${o.bis[i].toFixed(0)}</b></span>` : ''}`;
+}
+
+function renderParams() {
+  const ok = state.runs.filter(r => results[r.id] && !results[r.id].error);
+  const rows = [['V1, L', p => p.V1, 2], ['V2, L', p => p.V2, 1], ['V3, L', p => p.V3, 0], ['CL, L/min', p => p.CL, 2], ['Q2, L/min', p => p.Q2, 2], ['Q3, L/min', p => p.Q3, 2], ['k10, /min', p => p.k10, 3], ['ke0, /min', p => p.ke0, 3], ['Ce50 (BIS), µg/mL', p => p.ce50, 2], ['Lean mass used, kg', p => p.lean ?? null, 1]];
+  let t = `<table><thead><tr><th>Parameter</th>${ok.map(r => `<th class="n"><span class="swatch" style="--c:${color(r.slot)}"></span> ${esc(r.name)} · ${MODELS[r.model].short}</th>`).join('')}</tr></thead><tbody>`;
+  for (const [lab, f, dp] of rows) t += `<tr><td>${lab}</td>${ok.map(r => { const v = f(results[r.id].p); return `<td class="n">${v == null ? '—' : v.toFixed(dp)}</td>`; }).join('')}</tr>`;
+  document.getElementById('params').innerHTML = t + '</tbody></table>';
+}
+
+// ---------- popover editor for a pump input ----------
+function openPop(r, i) {
+  closePop();
+  sel = { id: r.id, i };
+  drawLane(r);
+  const host = document.getElementById(`r${r.id}-plot`), g = host._g, p = r.schedule[i];
+  const pop = document.createElement('div'); pop.className = 'pop';
+  pop.innerHTML = `<div class="row2"><label for="pop-t">From, min<input id="pop-t" type="number" min="0" max="${dur()}" step="0.5" value="${p.t}"${i === 0 ? ' disabled' : ''}></label>
+    <label for="pop-c">${r.mode === 'effect' ? 'Ce' : 'Cp'} target, µg/mL<input id="pop-c" type="number" min="0" max="20" step="0.1" value="${p.c}"></label></div>
+    <div class="btnrow"><button type="button" class="ghost del" data-pop="del"${i === 0 ? ' disabled' : ''}>Delete</button><span><button type="button" data-pop="stop">Stop (0)</button> <button type="button" data-pop="done">Done</button></span></div>`;
+  let x = g.X(p.t) + 14; if (x + 220 > g.W) x = g.X(p.t) - 224;
+  pop.style.left = Math.max(4, x) + 'px'; pop.style.top = Math.max(4, Math.min(g.Yc(p.c) - 20, G.concTop + G.concH - 60)) + 'px';
+  host.appendChild(pop);
+  const tIn = pop.querySelector('#pop-t'), cIn = pop.querySelector('#pop-c');
+  const apply = () => { const s = r.schedule[sel.i]; if (sel.i > 0) s.t = Math.min(dur(), Math.max(0.5, +tIn.value || 0)); s.c = Math.max(0, +cIn.value || 0); refresh(r, true); };
+  tIn.addEventListener('input', apply); cIn.addEventListener('input', apply);
+  pop.addEventListener('keydown', e => { if (e.key === 'Escape' || e.key === 'Enter') { closePop(true); } });
+  pop.addEventListener('click', e => {
+    const a = e.target.closest('[data-pop]'); if (!a) return;
+    if (a.dataset.pop === 'del') { r.schedule.splice(sel.i, 1); closePop(true); refresh(r); }
+    else if (a.dataset.pop === 'stop') { cIn.value = 0; apply(); }
+    else closePop(true);
+  });
+  setTimeout(() => cIn.focus(), 0); cIn.select && cIn.select();
+}
+function closePop(redraw) {
+  document.querySelectorAll('.pop').forEach(p => p.remove());
+  const had = sel; sel = null;
+  if (had && redraw) { const r = state.runs.find(x => x.id === had.id); if (r) { r.schedule.sort((a, b) => a.t - b.t); refresh(r); } }
+}
+
+// refresh after a change to one run. During drags only that run is resimulated; scales/ghosts update on release.
+let raf = 0;
+function refresh(r, live) {
+  if (live) {
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(() => { simOne(r); const keepSel = sel; for (const q of state.runs) drawLane(q); sel = keepSel; renderSide(); });
+    return;
+  }
+  save(); simAll(); drawAll();
+}
+
+// ---------- chart interaction ----------
+let drag = null;
+function svgPoint(svg, e) { const rc = svg.getBoundingClientRect(), vb = svg.viewBox.baseVal; return { x: (e.clientX - rc.left) * vb.width / rc.width, y: (e.clientY - rc.top) * vb.height / rc.height }; }
+function toTC(r, pt) {
+  const g = document.getElementById(`r${r.id}-plot`)._g;
+  const t = Math.min(g.D, Math.max(0, (pt.x - G.l) / g.pw * g.D));
+  const c = Math.max(0, (G.concTop + G.concH - pt.y) / G.concH * scales.conc);
+  return { t: Math.round(t * 2) / 2, c: c < 0.15 ? 0 : Math.round(c * 10) / 10 };
+}
+const board = document.getElementById('board');
+board.addEventListener('pointerdown', e => {
+  const svg = e.target.closest('svg'); if (!svg) return;
+  const r = state.runs.find(x => x.id === +svg.dataset.id); if (!r) return;
+  const h = e.target.closest('[data-role="handle"]');
+  if (h) {
+    const i = +h.dataset.i; const pt = svgPoint(svg, e);
+    drag = { r, i, x0: pt.x, y0: pt.y, moved: false };
+    e.preventDefault(); return;
+  }
+  if (e.target.dataset.role === 'area') {
+    const { t, c } = toTC(r, svgPoint(svg, e));
+    // click near an existing input in time edits it; otherwise adds a new one
+    let i = r.schedule.findIndex(s => Math.abs(s.t - t) < dur() / 120);
+    if (i < 0) { r.schedule.push({ t: Math.max(0.5, t), c }); r.schedule.sort((a, b) => a.t - b.t); i = r.schedule.findIndex(s => s.t === Math.max(0.5, t) && s.c === c); }
+    else r.schedule[i].c = c;
+    save(); simAll(); drawAll(); openPop(r, i);
+  }
+});
+const curSvg = r => document.querySelector(`svg[data-id="${r.id}"]`);
+window.addEventListener('pointermove', e => {
+  if (!drag) return;
+  {
+    const pt = svgPoint(curSvg(drag.r), e);
+    if (!drag.moved && Math.hypot(pt.x - drag.x0, pt.y - drag.y0) < 4) return;
+    drag.moved = true; closePop(false);
+    const { t, c } = toTC(drag.r, pt); const s = drag.r.schedule[drag.i];
+    s.c = c;
+    if (drag.i > 0) { const lo = drag.r.schedule[drag.i - 1].t + 0.5, hi = drag.i + 1 < drag.r.schedule.length ? drag.r.schedule[drag.i + 1].t - 0.5 : dur(); s.t = Math.min(hi, Math.max(lo, t)); }
+    sel = { id: drag.r.id, i: drag.i };
+    refresh(drag.r, true);
+  }
+});
+board.addEventListener('pointermove', e => {
+  if (drag) return;
+  const svg = e.target.closest('svg'); if (!svg) return;
+  const g = svg.parentElement._g; if (!g) return;
+  const pt = svgPoint(svg, e);
+  const t = (pt.x - G.l) / g.pw * g.D;
+  hoverT = t >= 0 && t <= g.D ? t : null;
+  for (const r of state.runs) updateRead(r);
+});
+window.addEventListener('pointerup', e => {
+  if (!drag) return;
+  const d = drag; drag = null;
+  if (!d.moved) { openPop(d.r, d.i); return; }
+  sel = null; refresh(d.r);
+});
+board.addEventListener('pointerleave', () => { if (!drag) { hoverT = null; for (const r of state.runs) updateRead(r); } });
+board.addEventListener('keydown', e => {
+  const h = e.target.closest('[data-role="handle"]'); if (!h || (e.key !== 'Enter' && e.key !== ' ')) return;
+  const r = state.runs.find(x => x.id === +h.closest('svg').dataset.id); e.preventDefault(); openPop(r, +h.dataset.i);
+});
+document.addEventListener('pointerdown', e => { if (!e.target.closest('.pop') && !e.target.closest('[data-role]') && document.querySelector('.pop')) closePop(true); });
+
+// ---------- pump-panel controls ----------
+const laneRun = el => { const l = el.closest('.lane'); return l && state.runs.find(r => r.id === +l.dataset.id); };
+board.addEventListener('input', e => {
+  if (e.target.closest('.pop')) return;
+  const r = laneRun(e.target); const k = e.target.dataset.k; if (!r || !k || k === 'model' || k === 'sex') return;
+  r[k] = e.target.type === 'number' ? +e.target.value : e.target.value;
+  if (k === 'name') { save(); renderParams(); return; }
+  clearTimeout(board._t); board._t = setTimeout(() => { save(); simAll(); drawAll(); }, 120);
+});
+board.addEventListener('change', e => {
+  const r = laneRun(e.target); const k = e.target.dataset.k; if (!r || (k !== 'model' && k !== 'sex')) return;
+  r[k] = e.target.value;
+  if (k === 'model') r.mode = r.model === 'marsh_dip' ? 'plasma' : 'effect'; // each model's default targeting
+  save(); simAll(); if (k === 'model') renderBoard(); else drawAll();
+});
+board.addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b || b.closest('.pop')) return;
+  if (b.id === 'add') {
+    if (state.runs.length >= MAX_RUNS) return; const slot = freeSlot();
+    state.runs.push({ id: state.nextId++, slot, name: 'Run ' + LETTERS[slot], model: 'eleveld', mode: 'effect', opiates: false, schedule: [{ t: 0, c: 0 }] });
+    save(); simAll(); renderBoard(); return;
+  }
+  const r = laneRun(b); if (!r) return;
+  if (b.dataset.k) {
+    const v = b.dataset.v, was = r[b.dataset.k];
+    r[b.dataset.k] = v === 'true' ? true : v === 'false' ? false : v; save(); simAll(); renderBoard();
+    if (b.dataset.k === 'mode' && v === 'effect' && was !== 'effect' && r.model === 'marsh_dip') marshAlert(r);
+    return;
+  }
+  const act = b.dataset.act;
+  if (act === 'clone' && state.runs.length < MAX_RUNS) {
+    const slot = freeSlot(), copy = JSON.parse(JSON.stringify(r));
+    Object.assign(copy, { id: state.nextId++, slot, name: 'Run ' + LETTERS[slot] });
+    state.runs.splice(state.runs.indexOf(r) + 1, 0, copy);
+  } else if (act === 'remove') state.runs = state.runs.filter(x => x !== r);
+  else if (act === 'sched-all') for (const x of state.runs) x.schedule = r.schedule.map(s => ({ ...s }));
+  else return;
+  save(); simAll(); renderBoard();
+});
+
+// ---------- Marsh effect-site alert ----------
+function closeAlert() { const a = document.getElementById('marsh-alert'); if (a) a.remove(); }
+function marshAlert(r) {
+  closeAlert();
+  const el = document.createElement('div');
+  el.id = 'marsh-alert'; el.className = 'alert'; el.setAttribute('role', 'alertdialog'); el.setAttribute('aria-labelledby', 'marsh-alert-h'); el.setAttribute('aria-describedby', 'marsh-alert-p');
+  el.innerHTML = `<div class="alert-icon" aria-hidden="true">!</div>
+    <div class="alert-body">
+      <h2 id="marsh-alert-h">Marsh wasn't designed for effect-site targeting</h2>
+      <p id="marsh-alert-p">Its ke0 of 0.26/min comes from the Diprifusor pump, which only offered plasma targeting. Predicted Ce, time to effect and the induction dose for ${esc(r.name)} may not be reliable.</p>
+      <div class="alert-actions"><button type="button" class="alert-primary" data-a="plasma">Switch ${esc(r.name)} to plasma</button><button type="button" data-a="keep">Keep effect site</button></div>
+    </div>`;
+  document.body.appendChild(el);
+  el.addEventListener('click', e => {
+    const a = e.target.closest('[data-a]'); if (!a) return;
+    if (a.dataset.a === 'plasma') { r.mode = 'plasma'; save(); simAll(); renderBoard(); }
+    closeAlert();
+  });
+  el.addEventListener('keydown', e => { if (e.key === 'Escape') closeAlert(); });
+  el.querySelector('[data-a="keep"]').focus();
+}
+
+// ---------- globals ----------
+const GL = { duration: 'g-duration', conc: 'g-conc', maxRate: 'g-max', wakeCe: 'g-wake' };
+const PT = { age: 'p-age', weight: 'p-weight', height: 'p-height', sex: 'p-sex' };
+function showBMI() {
+  const p = state.patient, ok = ['age', 'weight', 'height'].every(k => +document.getElementById(PT[k]).value > 0) && p.sex;
+  const b = p.weight / (p.height / 100) ** 2;
+  document.getElementById('p-bmi').innerHTML = ok ? `<span>BMI <b>${b.toFixed(1)}</b></span><span title="Effect-site concentration for 50% of maximal BIS effect, Eleveld PD model (age-adjusted)">Ce50 <b>${eleveldCe50(+p.age).toFixed(2)}</b> µg/mL</span>` : '';
+}
+for (const [k, id] of Object.entries(PT)) document.getElementById(id).addEventListener(k === 'sex' ? 'change' : 'input', e => {
+  const v = k === 'sex' ? e.target.value : +e.target.value; if (k !== 'sex' && !(v > 0)) { showBMI(); return; }
+  state.patient[k] = v; showBMI(); clearTimeout(window._pt); window._pt = setTimeout(() => { simAll(); drawAll(); }, 120);
+});
+function syncGlobals() {
+  for (const [k, id] of Object.entries(PT)) document.getElementById(id).value = state.patient[k]; showBMI(); for (const [k, id] of Object.entries(GL)) document.getElementById(id).value = state[k]; document.getElementById('g-bis').checked = !!state.bisAll; document.getElementById('g-ghost').checked = state.ghost !== false; }
+for (const [k, id] of Object.entries(GL)) document.getElementById(id).addEventListener('input', e => { const v = +e.target.value; if (v > 0) { state[k] = v; clearTimeout(window._gt); window._gt = setTimeout(() => { save(); simAll(); drawAll(); }, 150); } });
+document.getElementById('g-bis').addEventListener('change', e => { state.bisAll = e.target.checked; save(); drawAll(); });
+document.getElementById('g-ghost').addEventListener('change', e => { state.ghost = e.target.checked; save(); drawAll(); });
+document.getElementById('reset').addEventListener('click', () => { state = emptyState(); syncGlobals(); save(); simAll(); renderBoard(); });
+
+let rz; new ResizeObserver(() => { clearTimeout(rz); rz = setTimeout(() => { for (const r of state.runs) drawLane(r); }, 60); }).observe(board);
+syncGlobals(); simAll(); renderBoard();
+</script>
+</body>
+</html>
