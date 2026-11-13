@@ -16,7 +16,7 @@
   --band: rgba(58, 209, 230, 0.10); --ghost: #3a4750;
   --warn-bg: #3a2d10; --warn-ink: #f5d58a; --err-bg: #3d1a1a; --err-ink: #f4b4b4;
   --s1: #3ad1e6; --s2: #f0b43c; --s3: #b48cff; --s4: #ff8fc8;
-  --cp: #ff5a5a; --ce: #3ee37f;
+  --cp: #ff5a5a; --ce: #3ee37f; --run: #3ad1e6; --bis: #f0b43c; --ce50: #f0b43c;
   --font-body: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-display: "Manrope", system-ui, sans-serif;
   --font-num: "Manrope", system-ui, sans-serif;
@@ -105,7 +105,8 @@ header.top p { margin: 0; color: var(--ink-2); }
 .empty { padding: 28px 20px 8px; max-width: 560px; }
 .empty h2 { font-family: var(--font-display); font-size: 17px; margin: 0 0 4px; }
 .empty p { margin: 0; color: var(--ink-2); }
-button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 500; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 700; padding: 7px 16px; }
+button.primary:hover:not(:disabled) { border-color: #8ae6f2; background: #5adbec; }
 .alert { position: fixed; z-index: 20; left: 50%; top: 18px; transform: translateX(-50%); width: min(560px, calc(100% - 32px)); display: flex; gap: 14px; align-items: flex-start;
   background: #2a2110; border: 1px solid #8a6a1f; border-left: 5px solid #f0b43c; border-radius: 10px; padding: 14px 16px; box-shadow: 0 16px 40px rgba(0,0,0,0.6); color: var(--ink); }
 .alert-icon { flex: none; width: 26px; height: 26px; border-radius: 50%; background: #f0b43c; color: #1a1300; font-weight: 800; display: grid; place-items: center; font-size: 16px; }
@@ -134,7 +135,7 @@ td.n, th.n { text-align: right; }
 <header class="top">
   <div>
     <h1>Propofol TCI simulator</h1>
-    <p>Add a run, then click its chart to add a target change at that time. Drag a handle to move it, or click it to type exact values.</p>
+    <p>Start a simulation, then click its chart to add a target change at that time. Drag a handle to move it, or click it to type exact values.</p>
   </div>
   <div class="globals">
     <label for="g-duration">Duration <input id="g-duration" type="number" min="5" max="600" step="5"> min</label>
@@ -349,7 +350,7 @@ function simulate(run, opts) {
   const infTime = out.target.slice(0, N).filter(v => v > 0).length * dt;
   s.meanRate = infTime > 0 ? cum / +run.weight / (infTime / 60) : null;
   const last = sched[sched.length - 1];
-  if (last && last.c === 0 && last.t < opts.duration) {
+  if (last && last.c === 0 && last.t < opts.duration && sched.some(q => q.c > 0)) {
     const i0 = Math.round(last.t / dt);
     let iw = -1; for (let i = i0; i <= N; i++) if (out.ce[i] <= opts.wakeCe) { iw = i; break; }
     s.wake = iw >= 0 ? out.t[iw] - last.t : Infinity;
@@ -374,7 +375,7 @@ function emptyState() {
 }
 let state = emptyState();
 function save() {}
-const color = slot => `var(--s${slot + 1})`;
+const color = () => 'var(--run)'; // one colour scheme for every run, so lanes compare directly
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const freeSlot = () => [0, 1, 2, 3].find(s => !state.runs.some(r => r.slot === s));
 const dur = () => Math.min(600, Math.max(5, +state.duration || 60));
@@ -417,9 +418,7 @@ function pumpHTML(r) {
   const id = r.id, isE = r.model === 'eleveld';
   const opt = (v, l, cur) => `<option value="${v}"${v === cur ? ' selected' : ''}>${l}</option>`;
   const seg = (k, v, l) => `<button type="button" data-k="${k}" data-v="${v}" aria-pressed="${r[k] === v}">${l}</button>`;
-  return `<div class="head"><span class="swatch" aria-hidden="true"></span>
-      <input class="name" id="r${id}-name" type="text" value="${esc(r.name)}" data-k="name" aria-label="Run name">
-      <button type="button" data-act="clone" title="New run with the same model settings and pump inputs"${state.runs.length >= MAX_RUNS ? ' disabled' : ''}>Clone</button>
+  return `<div class="head"><input class="name" id="r${id}-name" type="text" value="${esc(r.name)}" data-k="name" aria-label="Run name">
       <button type="button" class="ghost" data-act="remove" aria-label="Remove ${esc(r.name)}">✕</button></div>
     <select id="r${id}-model" data-k="model" aria-label="Model">${Object.entries(MODELS).map(([k, m]) => opt(k, m.label, r.model)).join('')}</select>
     <div class="seg" role="group" aria-label="Targeting">${seg('mode', 'plasma', 'Plasma target')}${seg('mode', 'effect', 'Effect-site target')}</div>
@@ -434,8 +433,8 @@ function renderBoard() {
   b.innerHTML = state.runs.map(r => `<section class="lane" data-id="${r.id}" style="--c:${color(r.slot)}" aria-label="${esc(r.name)}">
       <div class="pumpcol">${pumpHTML(r)}</div>
       <div class="plotcol" id="r${r.id}-plot"></div></section>`).join('') +
-    (state.runs.length ? '' : `<div class="empty"><h2>No simulations yet</h2><p>Enter the patient above, add a run and choose its model. Then click the chart to set pump targets over time. Every run uses the same patient.</p></div>`) +
-    `<div class="addrow"><button type="button" id="add" class="${state.runs.length ? '' : 'primary'}"${state.runs.length >= MAX_RUNS ? ' disabled' : ''}>Add run</button><span>${state.runs.length >= MAX_RUNS ? 'Up to 4 runs.' : state.runs.length ? 'Or use Clone to copy a run and its pump inputs, then change the model.' : ''}</span></div>`;
+    (state.runs.length ? '' : `<div class="empty"><h2>No simulations yet</h2><p>Enter the patient above, press Start Simulation and choose a model. Then click the chart to set pump targets over time. Every run uses the same patient.</p></div>`) +
+    `<div class="addrow"><button type="button" id="add" class="primary"${state.runs.length >= MAX_RUNS ? ' disabled' : ''}>${state.runs.length ? 'Run comparison' : 'Start Simulation'}</button><span>${state.runs.length >= MAX_RUNS ? 'Up to 4 runs.' : state.runs.length ? 'Adds a new, blank run for the same patient.' : ''}</span></div>`;
   drawAll();
 }
 
@@ -473,6 +472,7 @@ function drawLane(r) {
   s += `<line x1="${G.l + 48}" x2="${G.l + 66}" y1="${G.concTop - 14}" y2="${G.concTop - 14}" stroke="var(--cp)" stroke-width="1.25"/><text class="lblt" x="${G.l + 70}" y="${G.concTop - 10}">Cp</text>`;
   s += `<line x1="${G.l + 94}" x2="${G.l + 112}" y1="${G.concTop - 14}" y2="${G.concTop - 14}" stroke="var(--ce)" stroke-width="2.5"/><text class="lblt" x="${G.l + 116}" y="${G.concTop - 10}">Ce</text>`;
   s += `<line x1="${G.l + 140}" x2="${G.l + 158}" y1="${G.concTop - 14}" y2="${G.concTop - 14}" stroke="${c}" stroke-width="1.5" stroke-dasharray="5 4"/><text class="lblt" x="${G.l + 162}" y="${G.concTop - 10}">Target</text>`;
+  s += `<line x1="${G.l + 208}" x2="${G.l + 226}" y1="${G.concTop - 14}" y2="${G.concTop - 14}" stroke="var(--ce50)" stroke-width="1.5" stroke-dasharray="1.5 4" stroke-linecap="round"/><text class="lblt" x="${G.l + 230}" y="${G.concTop - 10}">Ce50</text>`;
   // strips
   s += `<line class="base" x1="${G.l}" x2="${W - G.r}" y1="${Yr(0)}" y2="${Yr(0)}"/><text class="lblt" x="${G.l}" y="${G.rateTop - 4}">Infusion, mL/h</text><text x="${G.l - 5}" y="${G.rateTop + 4}" text-anchor="end">${scales.rate}</text>`;
   s += `<rect x="${G.l}" y="${Yb(60)}" width="${pw}" height="${Yb(40) - Yb(60)}" fill="var(--band)"/><line class="base" x1="${G.l}" x2="${W - G.r}" y1="${Yb(0)}" y2="${Yb(0)}"/>`;
@@ -483,13 +483,16 @@ function drawLane(r) {
     // ghosts of other runs' Ce
     if (state.ghost) for (const q of state.runs) { if (q === r) continue; const rq = results[q.id]; if (!rq || rq.error) continue;
       s += `<path d="${path(rq.out.t, rq.out.ce, Yc, false, every)}" fill="none" stroke="var(--ghost)" stroke-width="1.25"/>`; }
+    // patient's Ce50 (Eleveld PD, age-adjusted)
+    const ce50 = eleveldCe50(+state.patient.age);
+    if (ce50 <= scales.conc) s += `<line x1="${G.l}" x2="${W - G.r}" y1="${Yc(ce50)}" y2="${Yc(ce50)}" stroke="var(--ce50)" stroke-width="1.5" stroke-dasharray="1.5 4" stroke-linecap="round" pointer-events="none"/><text x="${W - G.r - 4}" y="${Yc(ce50) + 13}" text-anchor="end" class="lbl" style="fill: var(--ce50)">Ce50 ${ce50.toFixed(2)}</text>`;
     // Cp (thin) and Ce (thick)
     s += `<path d="${path(o.t, o.cp, Yc, false, every)}" fill="none" stroke="var(--cp)" stroke-width="1.25"/>`;
     s += `<path d="${path(o.t, o.ce, Yc, false, every)}" fill="none" stroke="var(--ce)" stroke-width="2.5"/>`;
     // rate as stepped area
     const rml = o.rate.map(v => v * 60 / state.conc);
     s += `<path d="${path(o.t, rml, Yr, true)}L${X(o.t[o.t.length - 1])},${Yr(0)}L${X(0)},${Yr(0)}Z" fill="${c}" fill-opacity="0.22" stroke="${c}" stroke-width="1.25"/>`;
-    if (r.model === 'eleveld' || state.bisAll) s += `<path d="${path(o.t, o.bis, Yb, false, every)}" fill="none" stroke="${c}" stroke-width="1.75"${r.model !== 'eleveld' ? ' stroke-dasharray="5 3"' : ''}/>`;
+    if (r.model === 'eleveld' || state.bisAll) s += `<path d="${path(o.t, o.bis, Yb, false, every)}" fill="none" stroke="var(--bis)" stroke-width="1.75"${r.model !== 'eleveld' ? ' stroke-dasharray="5 3"' : ''}/>`;
     else s += `<text class="lbl" x="${G.l + 8}" y="${G.bisTop + G.bisH / 2 + 4}">No BIS model for ${MODELS[r.model].short}. Tick “Estimate BIS” above to borrow Eleveld’s.</text>`;
     // labels at line ends
     const iL = o.t.length - 1;
@@ -544,7 +547,7 @@ function updateRead(r) {
 function renderParams() {
   const ok = state.runs.filter(r => results[r.id] && !results[r.id].error);
   const rows = [['V1, L', p => p.V1, 2], ['V2, L', p => p.V2, 1], ['V3, L', p => p.V3, 0], ['CL, L/min', p => p.CL, 2], ['Q2, L/min', p => p.Q2, 2], ['Q3, L/min', p => p.Q3, 2], ['k10, /min', p => p.k10, 3], ['ke0, /min', p => p.ke0, 3], ['Ce50 (BIS), µg/mL', p => p.ce50, 2], ['Lean mass used, kg', p => p.lean ?? null, 1]];
-  let t = `<table><thead><tr><th>Parameter</th>${ok.map(r => `<th class="n"><span class="swatch" style="--c:${color(r.slot)}"></span> ${esc(r.name)} · ${MODELS[r.model].short}</th>`).join('')}</tr></thead><tbody>`;
+  let t = `<table><thead><tr><th>Parameter</th>${ok.map(r => `<th class="n">${esc(r.name)} · ${MODELS[r.model].short}</th>`).join('')}</tr></thead><tbody>`;
   for (const [lab, f, dp] of rows) t += `<tr><td>${lab}</td>${ok.map(r => { const v = f(results[r.id].p); return `<td class="n">${v == null ? '—' : v.toFixed(dp)}</td>`; }).join('')}</tr>`;
   document.getElementById('params').innerHTML = t + '</tbody></table>';
 }
@@ -602,6 +605,7 @@ function toTC(r, pt) {
 }
 const board = document.getElementById('board');
 board.addEventListener('pointerdown', e => {
+  if (e.button !== 0) return; // only the primary (left) button or a touch adds or drags targets
   const svg = e.target.closest('svg'); if (!svg) return;
   const r = state.runs.find(x => x.id === +svg.dataset.id); if (!r) return;
   const h = e.target.closest('[data-role="handle"]');
@@ -674,6 +678,7 @@ board.addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b || b.closest('.pop')) return;
   if (b.id === 'add') {
     if (state.runs.length >= MAX_RUNS) return; const slot = freeSlot();
+    // every new run starts clean; the shared patient applies automatically
     state.runs.push({ id: state.nextId++, slot, name: 'Run ' + LETTERS[slot], model: 'eleveld', mode: 'effect', opiates: false, schedule: [{ t: 0, c: 0 }] });
     save(); simAll(); renderBoard(); return;
   }
