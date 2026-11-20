@@ -154,6 +154,7 @@ button.primary:hover:not(:disabled) { border-color: #8ae6f2; background: #5adbec
 .an-speed { width: auto; display: inline-grid; grid-template-columns: repeat(6, 48px); }
 .an-time { font-size: 15px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .an-time b { color: var(--ink); font-size: 18px; }
+.an-close { flex: none; white-space: nowrap; font-weight: 600; }
 .an-target { margin-left: auto; color: var(--accent); font-weight: 700; }
 .tl { position: relative; height: 14px; margin-top: 12px; background: var(--field); border: 1px solid var(--fieldline); border-radius: 7px; cursor: pointer; touch-action: none; }
 .tl-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); opacity: 0.55; border-radius: 7px; }
@@ -851,7 +852,7 @@ function openAnim(r, opener) {
   d.innerHTML = `<div class="dlg anim" role="dialog" aria-modal="true" aria-labelledby="anim-h">
     <div class="dlg-head"><div><h2 id="anim-h">${esc(r.name)} · inside the model</h2>
       <p>${MODELS[r.model].label} · ${r.mode === 'effect' ? 'effect-site' : 'plasma'} targeting · ${state.patient.age} y, ${state.patient.weight} kg. Tank areas are to scale with volume; a full tank = ${ctop} µg/mL.</p></div>
-      <button type="button" class="ghost dlg-x" data-close aria-label="Close">✕</button></div>
+      <button type="button" id="an-close" class="an-close" data-close>Close animation</button></div>
     <div class="anim-stage"><svg viewBox="0 0 ${VB.w} ${VB.h}" role="img" aria-label="Animated compartment model showing drug moving between V1, V2, V3, the effect site and elimination">
       <defs><marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerUnits="userSpaceOnUse" markerWidth="13" markerHeight="13" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="var(--ink-2)"/></marker></defs>
       <!-- pump -->
@@ -894,7 +895,6 @@ function openAnim(r, opener) {
       <div class="seg an-speed" role="group" aria-label="Playback speed">${[1, 2, 4, 16, 32, 64].map(s => `<button type="button" data-speed="${s}" aria-pressed="${s === 1}">${s}×</button>`).join('')}</div>
       <span class="an-time"><b id="an-t">0:00</b> / ${fmtMin(D)}</span>
       <span class="an-target" id="an-target"></span>
-      <button type="button" id="an-close" data-close>Close animation</button>
     </div>
     <div class="tl" id="an-tl" role="slider" tabindex="0" aria-label="Simulation time" aria-valuemin="0" aria-valuemax="${D}" aria-valuenow="0"><div class="tl-fill" id="an-fill"></div>${marks}</div>
   </div>`;
