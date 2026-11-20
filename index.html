@@ -116,6 +116,25 @@ button.primary:hover:not(:disabled) { border-color: #8ae6f2; background: #5adbec
 .alert-actions button { background: transparent; border-color: #8a6a1f; color: #ffe2a3; padding: 6px 12px; font-weight: 600; }
 .alert-actions .alert-primary { background: #f0b43c; border-color: #f0b43c; color: #1a1300; }
 @media (prefers-reduced-motion: no-preference) { .alert { animation: drop 0.18s ease-out; } @keyframes drop { from { transform: translate(-50%, -8px); opacity: 0.6; } } }
+.cursor-time { position: fixed; z-index: 15; display: none; pointer-events: none; padding: 3px 8px; border-radius: 6px; background: var(--ink); color: var(--bg); font: 700 13px var(--font-num); font-variant-numeric: tabular-nums; box-shadow: 0 4px 12px rgba(0,0,0,0.5); white-space: nowrap; }
+.logbtn { align-self: flex-start; display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px 0 8px; color: var(--ink-2); font-size: 13px; font-weight: 600; }
+.logbtn:hover { color: var(--accent); border-color: var(--accent) !important; }
+.dlg-back { position: fixed; inset: 0; z-index: 30; background: rgba(0,0,0,0.6); display: grid; place-items: center; padding: 16px; }
+.dlg { background: var(--panel); border: 1px solid var(--fieldline); border-radius: 12px; box-shadow: 0 20px 60px rgba(0,0,0,0.7); width: min(760px, 100%); max-height: calc(100% - 32px); overflow: auto; padding: 16px 18px; }
+.dlg-head { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; margin-bottom: 10px; }
+.dlg h2 { margin: 0; font-size: 17px; font-weight: 800; }
+.dlg-head p { margin: 2px 0 0; color: var(--ink-2); font-size: 13px; }
+.dlg-x { font-size: 16px; }
+.logtable td { font-size: 14px; padding: 7px 10px; }
+.logtable td.n { font-weight: 700; white-space: nowrap; }
+.logtable .sub { font-weight: 500; color: var(--ink-3); font-size: 12px; margin-left: 4px; }
+.logtable .end-row td { color: var(--ink-2); border-bottom: 0; }
+.logtable .empty-row { color: var(--ink-2); }
+.dlg-note { margin: 10px 0 0; font-size: 12px; color: var(--ink-3); }
+.gloss { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px 22px; margin: 16px 0 4px; }
+.gloss div { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 8px; align-items: baseline; }
+.gloss dt { font-weight: 800; color: var(--accent); font-size: 13px; }
+.gloss dd { margin: 0; color: var(--ink-2); font-size: 12.5px; line-height: 1.45; }
 details.params { margin: 0 16px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; }
 details.params summary { cursor: pointer; font-weight: 600; font-family: var(--font-display); font-size: 14px; }
 table { border-collapse: collapse; width: 100%; margin-top: 8px; }
@@ -161,6 +180,17 @@ td.n, th.n { text-align: right; }
 <details class="params">
   <summary>Model parameters for each run</summary>
   <div class="scroll" id="params"></div>
+  <dl class="gloss">
+    <div><dt>V1</dt><dd>Central volume: the blood and well-perfused organs the drug mixes into first. It sets the size of the bolus needed to reach a plasma target.</dd></div>
+    <div><dt>V2</dt><dd>Fast peripheral volume: tissues such as muscle that take up drug over minutes.</dd></div>
+    <div><dt>V3</dt><dd>Slow peripheral volume: mainly fat, which fills over hours. A large V3 means more accumulation in long cases and slower offset.</dd></div>
+    <div><dt>CL</dt><dd>Elimination clearance: plasma cleared of drug per minute, mostly by the liver. It largely sets the maintenance infusion rate.</dd></div>
+    <div><dt>Q2, Q3</dt><dd>Intercompartmental clearances: how quickly drug moves between the central volume and the fast (Q2) and slow (Q3) volumes.</dd></div>
+    <div><dt>k10</dt><dd>Elimination rate constant (CL ÷ V1): the fraction of drug in the central volume removed each minute.</dd></div>
+    <div><dt>ke0</dt><dd>Effect-site rate constant: how fast brain concentration (Ce) catches up with plasma (Cp). Half-time = 0.693 ÷ ke0, e.g. 0.26/min ≈ 2.7 min.</dd></div>
+    <div><dt>Ce50</dt><dd>The Ce that gives half the maximum fall in BIS (Eleveld PD model). It falls with age.</dd></div>
+    <div><dt>Lean mass</dt><dd>The lean-weight measure the model scales with: James LBM for Schnider, Al-Sallami fat-free mass for Eleveld. Marsh uses total weight only.</dd></div>
+  </dl>
 </details>
 <p class="foot">For teaching and model comparison only, not for clinical dosing. The pump updates every 5 s. Effect-site mode gives the largest rate whose predicted Ce peak stays at or below target, then holds Ce at target. BIS uses the Eleveld PD model (age-adjusted Ce50). Models: Marsh 1991, Schnider 1998/1999, Eleveld 2018.</p>
 
@@ -425,6 +455,7 @@ function pumpHTML(r) {
     ${isE ? `<label class="field1">Opioids co-administered<div class="seg">${seg('opiates', false, 'No')}${seg('opiates', true, 'Yes')}</div></label>` : ''}
     <div class="btnrow"><button type="button" class="ghost" data-act="sched-all" style="padding-left:0">Copy pump inputs to all</button></div>
     <div class="stats" id="r${id}-stats"></div>
+    <button type="button" class="logbtn" data-act="log" title="Intervention log for ${esc(r.name)}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/></svg><span>Show log</span></button>
     <div id="r${id}-chips" style="display:grid;gap:4px"></div>`;
 }
 
@@ -637,13 +668,25 @@ window.addEventListener('pointermove', e => {
     refresh(drag.r, true);
   }
 });
+// elapsed-time tag that follows the pointer over a chart
+const tag = document.createElement('div'); tag.className = 'cursor-time'; tag.setAttribute('aria-hidden', 'true'); document.body.appendChild(tag);
+function showTag(e, t) {
+  if (t == null) { tag.style.display = 'none'; return; }
+  tag.textContent = fmtMin(Math.round(t / DT) * DT);
+  tag.style.display = 'block';
+  const w = tag.offsetWidth, flip = e.clientX + 16 + w > window.innerWidth - 8;
+  tag.style.left = (flip ? e.clientX - 14 - w : e.clientX + 14) + 'px';
+  tag.style.top = Math.max(4, e.clientY - 30) + 'px';
+}
 board.addEventListener('pointermove', e => {
   if (drag) return;
-  const svg = e.target.closest('svg'); if (!svg) return;
-  const g = svg.parentElement._g; if (!g) return;
+  const svg = e.target.closest('svg');
+  const g = svg && svg.parentElement._g;
+  if (!g) { showTag(e, null); return; }
   const pt = svgPoint(svg, e);
   const t = (pt.x - G.l) / g.pw * g.D;
   hoverT = t >= 0 && t <= g.D ? t : null;
+  showTag(e, hoverT);
   for (const r of state.runs) updateRead(r);
 });
 window.addEventListener('pointerup', e => {
@@ -652,7 +695,7 @@ window.addEventListener('pointerup', e => {
   if (!d.moved) { openPop(d.r, d.i); return; }
   sel = null; refresh(d.r);
 });
-board.addEventListener('pointerleave', () => { if (!drag) { hoverT = null; for (const r of state.runs) updateRead(r); } });
+board.addEventListener('pointerleave', () => { tag.style.display = 'none'; if (!drag) { hoverT = null; for (const r of state.runs) updateRead(r); } });
 board.addEventListener('keydown', e => {
   const h = e.target.closest('[data-role="handle"]'); if (!h || (e.key !== 'Enter' && e.key !== ' ')) return;
   const r = state.runs.find(x => x.id === +h.closest('svg').dataset.id); e.preventDefault(); openPop(r, +h.dataset.i);
@@ -690,6 +733,7 @@ board.addEventListener('click', e => {
     return;
   }
   const act = b.dataset.act;
+  if (act === 'log') { openLog(r, b); return; }
   if (act === 'clone' && state.runs.length < MAX_RUNS) {
     const slot = freeSlot(), copy = JSON.parse(JSON.stringify(r));
     Object.assign(copy, { id: state.nextId++, slot, name: 'Run ' + LETTERS[slot] });
@@ -699,6 +743,42 @@ board.addEventListener('click', e => {
   else return;
   save(); simAll(); renderBoard();
 });
+
+// ---------- intervention log ----------
+function closeLog() { const d = document.getElementById('log-dlg'); if (d) { const back = d._back; d.remove(); if (back) back.focus(); } }
+function openLog(r, opener) {
+  closeLog();
+  const res = results[r.id], w = +state.patient.weight;
+  const steps = r.schedule.slice().sort((a, b) => a.t - b.t).filter((s, i) => !(i === 0 && s.c === 0));
+  let rows = '';
+  if (!res || res.error) rows = `<tr><td colspan="5">${esc(res ? res.error : 'No results yet.')}</td></tr>`;
+  else if (!steps.length) rows = `<tr><td colspan="5" class="empty-row">No interventions yet. Click the chart to set a target.</td></tr>`;
+  else {
+    const o = res.out, at = t => Math.min(o.t.length - 1, Math.round(t / DT));
+    const lab = r.mode === 'effect' ? 'Ce' : 'Cp';
+    let prev = null;
+    for (const s of steps) {
+      if (s.t > dur()) continue;
+      const i = at(s.t);
+      const what = s.c === 0 ? 'Stop infusion' : prev === null || prev === 0 ? `Start: ${lab} target ${s.c} µg/mL` : `${lab} target ${prev} → ${s.c} µg/mL`;
+      rows += `<tr><td class="n">${fmtMin(s.t)}</td><td>${what}</td><td class="n">${o.cum[i].toFixed(0)} mg <span class="sub">${(o.cum[i] / w).toFixed(2)} mg/kg</span></td><td class="n">${o.cp[i].toFixed(2)}</td><td class="n">${o.ce[i].toFixed(2)}</td></tr>`;
+      prev = s.c;
+    }
+    const iE = o.t.length - 1;
+    rows += `<tr class="end-row"><td class="n">${fmtMin(o.t[iE])}</td><td>End of simulation</td><td class="n">${o.cum[iE].toFixed(0)} mg <span class="sub">${(o.cum[iE] / w).toFixed(2)} mg/kg</span></td><td class="n">${o.cp[iE].toFixed(2)}</td><td class="n">${o.ce[iE].toFixed(2)}</td></tr>`;
+  }
+  const d = document.createElement('div');
+  d.id = 'log-dlg'; d.className = 'dlg-back'; d._back = opener;
+  d.innerHTML = `<div class="dlg" role="dialog" aria-modal="true" aria-labelledby="log-h">
+    <div class="dlg-head"><div><h2 id="log-h">${esc(r.name)} · intervention log</h2><p>${MODELS[r.model].label} · ${r.mode === 'effect' ? 'effect-site' : 'plasma'} targeting · ${state.patient.age} y, ${state.patient.weight} kg, ${state.patient.height} cm, ${state.patient.sex === 'M' ? 'male' : 'female'}</p></div>
+      <button type="button" class="ghost dlg-x" data-close aria-label="Close">✕</button></div>
+    <div class="scroll"><table class="logtable"><thead><tr><th class="n">Time</th><th>Intervention</th><th class="n">Total dose so far</th><th class="n">Cp, µg/mL</th><th class="n">Ce, µg/mL</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <p class="dlg-note">Dose, Cp and Ce are the values at the moment of each change, before it takes effect.</p></div>`;
+  document.body.appendChild(d);
+  d.addEventListener('click', e => { if (e.target === d || e.target.closest('[data-close]')) closeLog(); });
+  d.addEventListener('keydown', e => { if (e.key === 'Escape') closeLog(); });
+  d.querySelector('[data-close]').focus();
+}
 
 // ---------- Marsh effect-site alert ----------
 function closeAlert() { const a = document.getElementById('marsh-alert'); if (a) a.remove(); }
